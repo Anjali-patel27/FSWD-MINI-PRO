@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Excel Cleaner - CSPIT</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 30px;
+      background-color: #f9f9f9;
+    }
+    h1 {
+      color: #333;
+    }
+    input, button {
+      margin-top: 10px;
+      padding: 10px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Excel Column Filter for CSPIT</h1>
+  <p>Select your Excel file (.xlsx):</p>
+  <input
+    type="file"
+    id="uploadExcel"
+    accept=".xls,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+  />
+  <br>
+  <button onclick="processExcel()">Process and Download</button>
+
+  <!-- SheetJS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- FileSaver -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+  <script>
+    // Clean up date/time/day/year text
+    function removeDatesOrTimes(text) {
+      if (!text) return "";
+      return text
+        .replace(/\d{1,2}\/\d{1,2}\/\d{2,4}/g, '')       // remove 01/02/2023
+        .replace(/\d{4}-\d{2}-\d{2}/g, '')               // remove 2023-01-01
+        .replace(/\d{1,2}:\d{2}\s?[APMapm]{0,2}/g, '')   // remove 10:00 AM or 14:00
+        .replace(/\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b/gi, '') // remove Mon-Sun
+        .replace(/\b\d{4}\b/g, '')                       // remove 4-digit years
+        .trim();
+    }
+
+    // Normalize key for consistent matching
+    function normalizeKey(str) {
+      return str.toLowerCase().replace(/\s+/g, '');
+    }
+
+    // Fetch column value even if header is slightly wrong
+    function getFlexibleValue(row, expectedKey) {
+      const expected = normalizeKey(expectedKey);
+      for (const key in row) {
+        if (normalizeKey(key) === expected) {
+          return row[key];
+        }
+      }
+      return "";
+    }
+
+    function processExcel() {
+      const input = document.getElementById('uploadExcel');
+      const file = input.files[0];
+
+      if (!file) {
+        alert("Please upload an Excel file.");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+        const filtered = jsonData.map(row => {
+          const studentId = getFlexibleValue(row, "StudentID");
+          const subject = removeDatesOrTimes(getFlexibleValue(row, "Subject(s)"));
+          const attendance = removeDatesOrTimes(getFlexibleValue(row, "Gross Attendance"));
+
+          if (!studentId && !subject && !attendance) return null;
+
+          return {
+            "StudentID": studentId,
+            "Subject(s)": subject,
+            "Gross Attendance": attendance
+          };
+        }).filter(row => row !== null);
+
+        if (filtered.length === 0) {
+          alert("No matching data found. Please check your Excel column headers.");
+          return;
+        }
+
+        const newSheet = XLSX.utils.json_to_sheet(filtered);
+        const newWorkbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(newWorkbook, newSheet, "FilteredData");
+
+        const wbout = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
+        const blob = new Blob([wbout], { type: "application/octet-stream" });
+        saveAs(blob, "Filtered_CSPIT_Attendance.xlsx");
+
+        alert("File processed and downloaded!");
+      };
+
+      reader.readAsArrayBuffer(file);
+    }
+  </script>
+</body>
+</html>
